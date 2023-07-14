@@ -2,7 +2,7 @@
 name = "tui-rs-file-dialog"
 version = "0.1.0"
 edition = "2021"
-author = "Philipp Krones <hello@philkrones.com>"
+authors = ["Philipp Krones <hello@philkrones.com>"]
 
 [dependencies]
 crossterm = "0.26.1"
