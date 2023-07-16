@@ -1,3 +1,70 @@
+//! This is a tui-rs extension for a file dialog popup.
+//!
+//! ## Usage
+//!
+//! See the `examples` directory on how to use this extension. Run
+//!
+//! ```
+//! cargo run --example demo
+//! ```
+//!
+//! to see it in action.
+//!
+//! First, add a file dialog to the TUI app:
+//!
+//! ```rust
+//! use tui_rs_file_dialog::FileDialog;
+//!
+//! struct App {
+//!     // Other fields of the App...
+//!
+//!     file_dialog: FileDialog
+//! }
+//! ```
+//!
+//! If you want to use the default key bindings provided by this crate, just wrap
+//! the event handler of your app in the [`bind_keys!`] macro.
+//!
+//! ```rust
+//! use tui_rs_file_dialog::bind_keys;
+//!
+//! fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
+//!     loop {
+//!         terminal.draw(|f| ui(f, &mut app))?;
+//!
+//!         bind_keys!(
+//!             // Expression to use to access the file dialog.
+//!             app.file_dialog,
+//!             // Event handler of the app, when the file dialog is closed.
+//!             if let Event::Key(key) = event::read()? {
+//!                 match key.code {
+//!                     KeyCode::Char('q') => {
+//!                         return Ok(());
+//!                     }
+//!                     _ => {}
+//!                 }
+//!             }
+//!         )
+//!     }
+//! }
+//! ```
+//!
+//! Finally, draw the file dialog:
+//!
+//! ```rust
+//! fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
+//!     // Other UI drawing code...
+//!
+//!     app.file_dialog.draw(f);
+//! }
+//! ```
+//!
+//! ## Limitations
+//!
+//! I've started this crate with a minimalistic approach and new functionality will
+//! be added on a use-case basis. For example, it is currently not possible to add
+//! styling to the file dialog and just a boring, minimalist block with a list is
+//! used to render it.
 use std::{cmp, ffi::OsString, fs, io::Result, iter, path::PathBuf};
 use tui::{
     backend::Backend,
@@ -7,12 +74,25 @@ use tui::{
     Frame,
 };
 
+/// A pattern that can be used to filter the displayed files.
 pub enum FilePattern {
+    /// Filter by file extension. This filter is case insensitive.
     Extension(String),
+    /// Filter by substring. This filter is case sensitive.
     Substring(String),
 }
 
+/// The file dialog.
+///
+/// This manages the state of the file dialog. After selecting a file, the absolute path to that
+/// file will be stored in the file dialog.
+///
+/// The file dialog is opened with the current working directory by default. To start the file
+/// dialog with a different directory, use [`FileDialog::set_dir`].
 pub struct FileDialog {
+    /// The file that was selected when the file dialog was open the last time.
+    ///
+    /// This will reset when re-opening the file dialog.
     pub selected_file: Option<PathBuf>,
 
     width: u16,
@@ -28,6 +108,10 @@ pub struct FileDialog {
 }
 
 impl FileDialog {
+    /// Create a new file dialog.
+    ///
+    /// The width and height are the size of the file dialog in percent of the terminal size. They
+    /// are clamped to 100%.
     pub fn new(width: u16, height: u16) -> Result<Self> {
         let mut s = Self {
             width: cmp::min(width, 100),
@@ -48,33 +132,44 @@ impl FileDialog {
 
         Ok(s)
     }
+
+    /// The directory to open the file dialog in.
     pub fn set_dir(&mut self, dir: PathBuf) -> Result<()> {
         self.current_dir = dir.canonicalize()?;
         self.update_entries()
     }
+    /// Sets the filter to use when browsing files.
     pub fn set_filter(&mut self, filter: FilePattern) -> Result<()> {
         self.filter = Some(filter);
         self.update_entries()
     }
+    /// Removes the filter.
     pub fn reset_filter(&mut self) -> Result<()> {
         self.filter.take();
         self.update_entries()
     }
+    /// Toggles whether hidden files should be shown.
+    ///
+    /// This only checks whether the file name starts with a dot.
     pub fn toggle_show_hidden(&mut self) -> Result<()> {
         self.show_hidden = !self.show_hidden;
         self.update_entries()
     }
 
+    /// Opens the file dialog.
     pub fn open(&mut self) {
         self.selected_file.take();
         self.open = true;
     }
+    /// Closes the file dialog.
     pub fn close(&mut self) {
         self.open = false;
     }
+    /// Returns whether the file dialog is currently open.
     pub fn is_open(&self) -> bool {
         self.open
     }
+    /// Draws the file dialog in the TUI application.
     pub fn draw<B: Backend>(&mut self, f: &mut Frame<B>) {
         if self.open {
             let block = Block::default()
@@ -97,6 +192,7 @@ impl FileDialog {
         }
     }
 
+    /// Goes to the next item in the file list.
     pub fn next(&mut self) {
         let i = match self.list_state.selected() {
             Some(i) => cmp::min(self.items.len() - 1, i + 1),
@@ -104,6 +200,7 @@ impl FileDialog {
         };
         self.list_state.select(Some(i));
     }
+    /// Goes to the previous item in the file list.
     pub fn previous(&mut self) {
         let i = match self.list_state.selected() {
             Some(i) => i.saturating_sub(1),
@@ -111,11 +208,17 @@ impl FileDialog {
         };
         self.list_state.select(Some(i));
     }
+    /// Moves one directory up.
     pub fn up(&mut self) -> Result<()> {
         self.current_dir.pop();
         self.update_entries()
     }
 
+    /// Selects an item in the file list.
+    ///
+    /// If the item is a directory, the file dialog will move into that directory. If the item is a
+    /// file, the file dialog will close and the path to the file will be stored in
+    /// [`FileDialog::selected_file`].
     pub fn select(&mut self) -> Result<()> {
         let Some(selected) = self.list_state.selected() else {
             self.next();
@@ -133,6 +236,7 @@ impl FileDialog {
         self.update_entries()
     }
 
+    /// Updates the entries in the file list. This function is called automatically when necessary.
     fn update_entries(&mut self) -> Result<()> {
         self.items = iter::once("..".to_string())
             .chain(
@@ -187,6 +291,40 @@ impl FileDialog {
     }
 }
 
+/// Macro to automatically overwrite the default key bindings of the app, when the file dialog is
+/// open.
+///
+/// This macro only works inside of a function that returns a [`std::io::Result`] or a result that
+/// has an error type that implements [`From<std::io::Error>`].
+///
+/// Default bindings:
+///
+/// | Key | Action |
+/// | --- | --- |
+/// | `q`, `Esc` | Close the file dialog. |
+/// | `j`, `Down` | Move down in the file list. |
+/// | `k`, `Up` | Move up in the file list. |
+/// | `Enter` | Select the current item. |
+/// | `u` | Move one directory up. |
+/// | `I` | Toggle showing hidden files. |
+///
+/// ## Example
+///
+/// ```ignore
+/// bind_keys!(
+///     // Expression to use to access the file dialog.
+///     app.file_dialog,
+///     // Event handler of the app, when the file dialog is closed.
+///     if let Event::Key(key) = event::read()? {
+///         match key.code {
+///             KeyCode::Char('q') => {
+///                 return Ok(());
+///             }
+///             _ => {}
+///         }
+///     }
+/// )
+/// ```
 #[macro_export]
 macro_rules! bind_keys {
     ($file_dialog:expr, $e:expr) => {{
@@ -220,6 +358,7 @@ macro_rules! bind_keys {
     }};
 }
 
+/// Helper function to create a centered rectangle in the TUI app.
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)
