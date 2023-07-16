@@ -1,8 +1,12 @@
 [package]
 name = "tui-rs-file-dialog"
+description = "A file dialog extension for the tui-rs crate"
 version = "0.1.0"
 edition = "2021"
 authors = ["Philipp Krones <hello@philkrones.com>"]
+license = "MIT"
+repository = "https://github.com/flip1995/tui-rs-file-dialog"
+keywords = ["tui", "tui-rs", "extension"]
 
 [[example]]
 name = "demo"
