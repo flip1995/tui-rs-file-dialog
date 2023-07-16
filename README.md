@@ -15,7 +15,7 @@ to see it in action.
 First, add a file dialog to the TUI app:
 
 ```rust
-use tui_rs_file_dialog::FileDialog;
+use tui_file_dialog::FileDialog;
 
 struct App {
     // Other fields of the App...
@@ -28,7 +28,7 @@ If you want to use the default key bindings provided by this crate, just wrap
 the event handler of your app in the `bind_keys!` macro:
 
 ```rust
-use tui_rs_file_dialog::bind_keys;
+use tui_file_dialog::bind_keys;
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
     loop {

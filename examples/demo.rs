@@ -10,7 +10,7 @@ use tui::{
     Frame, Terminal,
 };
 
-use tui_rs_file_dialog::{bind_keys, FileDialog};
+use tui_file_dialog::{bind_keys, FileDialog};
 
 struct App {
     // 1. Add the `FileDialog` to the tui app.

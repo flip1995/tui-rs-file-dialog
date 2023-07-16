@@ -1,5 +1,5 @@
 [package]
-name = "tui-rs-file-dialog"
+name = "tui-file-dialog"
 description = "A file dialog extension for the tui-rs crate"
 version = "0.1.0"
 edition = "2021"
