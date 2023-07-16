@@ -7,21 +7,18 @@ use tui::{
     Frame,
 };
 
-#[derive(Debug)]
 pub enum FilePattern {
     Extension(String),
-    Name(String),
     Substring(String),
 }
 
-#[derive(Debug)]
 pub struct FileDialog {
-    width: u16,
-    height: u16,
-    filter: Option<FilePattern>,
-
     pub selected_file: Option<PathBuf>,
 
+    width: u16,
+    height: u16,
+
+    filter: Option<FilePattern>,
     open: bool,
     current_dir: PathBuf,
     show_hidden: bool,
@@ -31,14 +28,14 @@ pub struct FileDialog {
 }
 
 impl FileDialog {
-    pub fn new(width: u16, height: u16, filter: Option<FilePattern>) -> Result<Self> {
+    pub fn new(width: u16, height: u16) -> Result<Self> {
         let mut s = Self {
             width: cmp::min(width, 100),
             height: cmp::min(height, 100),
-            filter,
 
             selected_file: None,
 
+            filter: None,
             open: false,
             current_dir: PathBuf::from(".").canonicalize().unwrap(),
             show_hidden: false,
@@ -63,12 +60,13 @@ impl FileDialog {
         self.filter.take();
         self.update_entries()
     }
-    pub fn invert_show_hidden(&mut self) -> Result<()> {
+    pub fn toggle_show_hidden(&mut self) -> Result<()> {
         self.show_hidden = !self.show_hidden;
         self.update_entries()
     }
 
     pub fn open(&mut self) {
+        self.selected_file.take();
         self.open = true;
     }
     pub fn close(&mut self) {
@@ -94,7 +92,7 @@ impl FileDialog {
                     .add_modifier(Modifier::BOLD),
             );
 
-            let area = centered_rect(self.height, self.width, f.size());
+            let area = centered_rect(self.width, self.height, f.size());
             f.render_stateful_widget(list, area, &mut self.list_state);
         }
     }
@@ -154,9 +152,6 @@ impl FileDialog {
                             FilePattern::Extension(ext) => e.extension().map_or(false, |e| {
                                 e.to_ascii_lowercase() == OsString::from(ext.to_ascii_lowercase())
                             }),
-                            FilePattern::Name(name) => {
-                                e.file_name().map_or(false, |n| n == OsString::from(name))
-                            }
                             FilePattern::Substring(substr) => e
                                 .file_name()
                                 .map_or(false, |n| n.to_string_lossy().contains(substr)),
@@ -203,7 +198,7 @@ macro_rules! bind_keys {
                     KeyCode::Char('q') | KeyCode::Esc => {
                         $file_dialog.close();
                     }
-                    KeyCode::Char('I') => $file_dialog.invert_show_hidden()?,
+                    KeyCode::Char('I') => $file_dialog.toggle_show_hidden()?,
                     KeyCode::Enter => {
                         $file_dialog.select()?;
                     }

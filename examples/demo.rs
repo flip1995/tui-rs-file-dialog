@@ -6,15 +6,14 @@ use crossterm::{
 use std::io::{self, Result};
 use tui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Direction, Layout},
     widgets::{Block, Borders},
     Frame, Terminal,
 };
 
 use tui_rs_file_dialog::{bind_keys, FileDialog};
 
-#[derive(Debug)]
 struct App {
+    // 1. Add the `FileDialog` to the tui app.
     file_dialog: FileDialog,
 }
 
@@ -31,7 +30,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let res = run_app(&mut terminal, App::new(FileDialog::new(50, 50, None)?));
+    let res = run_app(&mut terminal, App::new(FileDialog::new(60, 40)?));
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -48,6 +47,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
     loop {
         terminal.draw(|f| ui(f, &mut app))?;
 
+        // 2. Use the `bind_keys` macro to overwrite key bindings, when the file dialog is open.
+        // The first argument of the macro is the expression that should be used to access the file
+        // dialog.
         bind_keys!(
             app.file_dialog,
             if let Event::Key(key) = event::read()? {
@@ -66,14 +68,17 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
 }
 
 fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
-        .split(f.size());
-    let block = Block::default().title("Block 1").borders(Borders::ALL);
-    f.render_widget(block, chunks[0]);
-    let block = Block::default().title("Block 2").borders(Borders::ALL);
-    f.render_widget(block, chunks[1]);
+    let block = Block::default()
+        .title(format!(
+            "Selected file: {}",
+            app.file_dialog
+                .selected_file
+                .as_ref()
+                .map_or("None".to_string(), |f| f.to_string_lossy().to_string())
+        ))
+        .borders(Borders::ALL);
+    f.render_widget(block, f.size());
 
+    // 3. Call the draw function of the file dialog in order to render it.
     app.file_dialog.draw(f);
 }
