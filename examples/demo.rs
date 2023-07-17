@@ -10,7 +10,7 @@ use tui::{
     Frame, Terminal,
 };
 
-use tui_file_dialog::{bind_keys, FileDialog};
+use tui_file_dialog::{bind_keys, FileDialog, FilePattern};
 
 struct App {
     // 1. Add the `FileDialog` to the tui app.
@@ -30,7 +30,10 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let res = run_app(&mut terminal, App::new(FileDialog::new(60, 40)?));
+    let mut file_dialog = FileDialog::new(60, 40)?;
+    file_dialog.set_multi_selection(true);
+    file_dialog.set_filter(FilePattern::Extension("toml".to_string()))?;
+    let res = run_app(&mut terminal, App::new(file_dialog));
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -70,11 +73,13 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
 fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
     let block = Block::default()
         .title(format!(
-            "Selected file: {}",
+            "Selected files: {}",
             app.file_dialog
-                .selected_file
-                .as_ref()
-                .map_or("None".to_string(), |f| f.to_string_lossy().to_string())
+                .selected_files
+                .iter()
+                .map(|f| f.to_string_lossy().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         ))
         .borders(Borders::ALL);
     f.render_widget(block, f.size());

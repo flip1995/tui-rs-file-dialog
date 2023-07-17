@@ -65,12 +65,12 @@
 //! be added on a use-case basis. For example, it is currently not possible to add
 //! styling to the file dialog and just a boring, minimalist block with a list is
 //! used to render it.
-use std::{cmp, ffi::OsString, fs, io::Result, iter, path::PathBuf};
+use std::{cmp, collections::HashSet, ffi::OsString, fs, io::Result, iter, path::PathBuf};
 use tui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
 
@@ -80,6 +80,23 @@ pub enum FilePattern {
     Extension(String),
     /// Filter by substring. This filter is case sensitive.
     Substring(String),
+}
+
+impl FilePattern {
+    /// Returns whether the given file name matches the filter.
+    pub fn matches(&self, file: &PathBuf) -> bool {
+        if file.is_dir() {
+            return true;
+        }
+        match self {
+            FilePattern::Extension(ext) => file.extension().map_or(false, |e| {
+                e.to_ascii_lowercase() == OsString::from(ext.to_ascii_lowercase())
+            }),
+            FilePattern::Substring(substr) => file
+                .file_name()
+                .map_or(false, |n| n.to_string_lossy().contains(substr)),
+        }
+    }
 }
 
 /// The file dialog.
@@ -93,7 +110,7 @@ pub struct FileDialog {
     /// The file that was selected when the file dialog was open the last time.
     ///
     /// This will reset when re-opening the file dialog.
-    pub selected_file: Option<PathBuf>,
+    pub selected_files: Vec<PathBuf>,
 
     width: u16,
     height: u16,
@@ -103,8 +120,12 @@ pub struct FileDialog {
     current_dir: PathBuf,
     show_hidden: bool,
 
+    default_bindings: bool,
+    multi_selection: bool,
+
     list_state: ListState,
     items: Vec<String>,
+    selected_indices: HashSet<usize>,
 }
 
 impl FileDialog {
@@ -117,15 +138,19 @@ impl FileDialog {
             width: cmp::min(width, 100),
             height: cmp::min(height, 100),
 
-            selected_file: None,
+            selected_files: vec![],
 
             filter: None,
             open: false,
             current_dir: PathBuf::from(".").canonicalize().unwrap(),
             show_hidden: false,
 
+            default_bindings: false,
+            multi_selection: false,
+
             list_state: ListState::default(),
             items: vec![],
+            selected_indices: HashSet::new(),
         };
 
         s.update_entries()?;
@@ -133,6 +158,20 @@ impl FileDialog {
         Ok(s)
     }
 
+    /// Whether the default bindings are used.
+    ///
+    /// This is set by the [`bind_keys!`] macro automatically.
+    pub fn default_bindings(&mut self, used: bool) {
+        self.default_bindings = used;
+    }
+    /// Whether multi selection should be enabled.
+    pub fn set_multi_selection(&mut self, enable: bool) {
+        self.multi_selection = enable;
+    }
+    /// Returns true, when multi selection is enabled.
+    pub fn multi_selection(&self) -> bool {
+        self.multi_selection
+    }
     /// The directory to open the file dialog in.
     pub fn set_dir(&mut self, dir: PathBuf) -> Result<()> {
         self.current_dir = dir.canonicalize()?;
@@ -157,8 +196,11 @@ impl FileDialog {
     }
 
     /// Opens the file dialog.
+    ///
+    /// Resets the selected files.
     pub fn open(&mut self) {
-        self.selected_file.take();
+        self.selected_files.clear();
+        self.selected_indices.clear();
         self.open = true;
     }
     /// Closes the file dialog.
@@ -178,7 +220,22 @@ impl FileDialog {
             let list_items: Vec<ListItem> = self
                 .items
                 .iter()
-                .map(|s| ListItem::new(s.as_str()))
+                .enumerate()
+                .map(|(i, s)| {
+                    ListItem::new(format!(
+                        "{}{}",
+                        if self.multi_selection {
+                            if self.selected_indices.contains(&i) {
+                                "☑ "
+                            } else {
+                                "☐ "
+                            }
+                        } else {
+                            ""
+                        },
+                        s.as_str()
+                    ))
+                })
                 .collect();
 
             let list = List::new(list_items).block(block).highlight_style(
@@ -187,7 +244,26 @@ impl FileDialog {
                     .add_modifier(Modifier::BOLD),
             );
 
-            let area = centered_rect(self.width, self.height, f.size());
+            let mut area = centered_rect(self.width, self.height, f.size());
+            if self.default_bindings {
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Min(1), Constraint::Length(1)].as_ref())
+                    .split(area);
+                area = chunks[0];
+                f.render_widget(
+                    Paragraph::new(format!(
+                        "{}'Enter': open - 'q': quit",
+                        if self.multi_selection {
+                            "'Space': select - "
+                        } else {
+                            ""
+                        }
+                    ))
+                    .alignment(tui::layout::Alignment::Right),
+                    chunks[1],
+                );
+            }
             f.render_stateful_widget(list, area, &mut self.list_state);
         }
     }
@@ -209,16 +285,22 @@ impl FileDialog {
         self.list_state.select(Some(i));
     }
     /// Moves one directory up.
+    ///
+    /// Resets the selected files in multi selection mode.
     pub fn up(&mut self) -> Result<()> {
         self.current_dir.pop();
+        self.selected_files.clear();
+        self.selected_indices.clear();
         self.update_entries()
     }
 
     /// Selects an item in the file list.
     ///
     /// If the item is a directory, the file dialog will move into that directory. If the item is a
-    /// file, the file dialog will close and the path to the file will be stored in
-    /// [`FileDialog::selected_file`].
+    /// file, the file will be selected. If multi selection is not enabled, the file dialog will
+    /// close and the path to the file will be stored in [`FileDialog::selected_files`].
+    ///
+    /// Resets the selected files when changing directory in multi selection mode.
     pub fn select(&mut self) -> Result<()> {
         let Some(selected) = self.list_state.selected() else {
             self.next();
@@ -227,13 +309,42 @@ impl FileDialog {
 
         let path = self.current_dir.join(&self.items[selected]);
         if path.is_file() {
-            self.selected_file = Some(path);
-            self.close();
+            self.toggle_selection();
+            if !self.multi_selection {
+                self.close();
+            }
             return Ok(());
         }
 
-        self.current_dir = path;
+        self.current_dir = path.canonicalize()?;
+        self.selected_files.clear();
+        self.selected_indices.clear();
         self.update_entries()
+    }
+
+    /// Toggles the selection of the currently selected item.
+    ///
+    /// This only makes sense in multi selection mode. In single selection mode, use the
+    /// [`FileDialog::select`] method.
+    pub fn toggle_selection(&mut self) {
+        let Some(selected) = self.list_state.selected() else {
+            self.next();
+            return;
+        };
+
+        if self.selected_indices.contains(&selected) {
+            self.selected_indices.remove(&selected);
+            self.selected_files.remove(
+                self.selected_files
+                    .iter()
+                    .position(|f| f == &self.current_dir.join(&self.items[selected]))
+                    .expect("file must have been selected"),
+            );
+        } else {
+            self.selected_indices.insert(selected);
+            self.selected_files
+                .push(self.current_dir.join(&self.items[selected]));
+        }
     }
 
     /// Updates the entries in the file list. This function is called automatically when necessary.
@@ -242,24 +353,18 @@ impl FileDialog {
             .chain(
                 fs::read_dir(&self.current_dir)?
                     .flatten()
-                    .filter(|e| {
-                        let e = e.path();
-                        if e.file_name()
+                    .filter(|file| {
+                        let file = file.path();
+                        if file
+                            .file_name()
                             .map_or(false, |n| n.to_string_lossy().starts_with('.'))
                         {
                             return self.show_hidden;
                         }
-                        if e.is_dir() || self.filter.is_none() {
-                            return true;
+                        if let Some(ref filter) = self.filter {
+                            return filter.matches(&file);
                         }
-                        match self.filter.as_ref().unwrap() {
-                            FilePattern::Extension(ext) => e.extension().map_or(false, |e| {
-                                e.to_ascii_lowercase() == OsString::from(ext.to_ascii_lowercase())
-                            }),
-                            FilePattern::Substring(substr) => e
-                                .file_name()
-                                .map_or(false, |n| n.to_string_lossy().contains(substr)),
-                        }
+                        true
                     })
                     .map(|file| {
                         let file_name = file.file_name();
@@ -304,13 +409,14 @@ impl FileDialog {
 /// | `q`, `Esc` | Close the file dialog. |
 /// | `j`, `Down` | Move down in the file list. |
 /// | `k`, `Up` | Move up in the file list. |
-/// | `Enter` | Select the current item. |
+/// | `Enter` | Open the current item. |
+/// | `Space` | Select the current item (if multi selection is enabled). |
 /// | `u` | Move one directory up. |
 /// | `I` | Toggle showing hidden files. |
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```
 /// bind_keys!(
 ///     // Expression to use to access the file dialog.
 ///     app.file_dialog,
@@ -328,6 +434,7 @@ impl FileDialog {
 #[macro_export]
 macro_rules! bind_keys {
     ($file_dialog:expr, $e:expr) => {{
+        $file_dialog.default_bindings(true);
         if $file_dialog.is_open() {
             use ::crossterm::event::{self, Event, KeyCode};
             // File dialog events
@@ -339,6 +446,9 @@ macro_rules! bind_keys {
                     KeyCode::Char('I') => $file_dialog.toggle_show_hidden()?,
                     KeyCode::Enter => {
                         $file_dialog.select()?;
+                    }
+                    KeyCode::Char(' ') if $file_dialog.multi_selection() => {
+                        $file_dialog.toggle_selection();
                     }
                     KeyCode::Char('u') => {
                         $file_dialog.up()?;
