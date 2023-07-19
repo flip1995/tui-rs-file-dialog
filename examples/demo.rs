@@ -3,7 +3,10 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use std::io::{self, Result};
+use std::{
+    io::{self, Result},
+    path::PathBuf,
+};
 use tui::{
     backend::{Backend, CrosstermBackend},
     widgets::{Block, Borders},
@@ -15,11 +18,16 @@ use tui_file_dialog::{bind_keys, FileDialog, FilePattern};
 struct App {
     // 1. Add the `FileDialog` to the tui app.
     file_dialog: FileDialog,
+
+    selected_files: Vec<PathBuf>,
 }
 
 impl App {
     pub fn new(file_dialog: FileDialog) -> Self {
-        Self { file_dialog }
+        Self {
+            file_dialog,
+            selected_files: vec![],
+        }
     }
 }
 
@@ -66,7 +74,12 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     _ => {}
                 }
             }
-        )
+        );
+
+        // 3. Deal with the result of the file dialog
+        if let Some(selected_files) = app.file_dialog.selected_files() {
+            app.selected_files = selected_files;
+        }
     }
 }
 
@@ -74,8 +87,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
     let block = Block::default()
         .title(format!(
             "Selected files: {}",
-            app.file_dialog
-                .selected_files
+            app.selected_files
                 .iter()
                 .map(|f| f.to_string_lossy().to_string())
                 .collect::<Vec<_>>()
@@ -84,6 +96,6 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
         .borders(Borders::ALL);
     f.render_widget(block, f.size());
 
-    // 3. Call the draw function of the file dialog in order to render it.
+    // 4. Call the draw function of the file dialog in order to render it.
     app.file_dialog.draw(f);
 }

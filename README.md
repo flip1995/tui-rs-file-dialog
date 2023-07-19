@@ -51,6 +51,20 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
 }
 ```
 
+Also in the `run_app` function, deal with the selected files:
+
+```rust
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
+    loop {
+        // Bindings and app drawing code...
+
+        if let Some(selected_files) = app.file_dialog.selected_files() {
+            app.selected_files = selected_files;
+        }
+     }
+}
+```
+
 Finally, draw the file dialog:
 
 ```rust

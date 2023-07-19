@@ -49,6 +49,20 @@
 //! }
 //! ```
 //!
+//! Also in the `run_app` function, deal with the selected files:
+//!
+//! ```rust
+//! fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
+//!     loop {
+//!         // Bindings and app drawing code...
+//!
+//!         if let Some(selected_files) = app.file_dialog.selected_files() {
+//!             app.selected_files = selected_files;
+//!         }
+//!      }
+//! }
+//! ```
+//!
 //! Finally, draw the file dialog:
 //!
 //! ```rust
@@ -65,7 +79,15 @@
 //! be added on a use-case basis. For example, it is currently not possible to add
 //! styling to the file dialog and just a boring, minimalist block with a list is
 //! used to render it.
-use std::{cmp, collections::HashSet, ffi::OsString, fs, io::Result, iter, path::PathBuf};
+use std::{
+    cmp,
+    collections::HashSet,
+    ffi::OsString,
+    fs,
+    io::Result,
+    iter,
+    path::{Path, PathBuf},
+};
 use tui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -84,7 +106,7 @@ pub enum FilePattern {
 
 impl FilePattern {
     /// Returns whether the given file name matches the filter.
-    pub fn matches(&self, file: &PathBuf) -> bool {
+    pub fn matches(&self, file: &Path) -> bool {
         if file.is_dir() {
             return true;
         }
@@ -107,11 +129,6 @@ impl FilePattern {
 /// The file dialog is opened with the current working directory by default. To start the file
 /// dialog with a different directory, use [`FileDialog::set_dir`].
 pub struct FileDialog {
-    /// The file that was selected when the file dialog was open the last time.
-    ///
-    /// This will reset when re-opening the file dialog.
-    pub selected_files: Vec<PathBuf>,
-
     width: u16,
     height: u16,
 
@@ -137,8 +154,6 @@ impl FileDialog {
         let mut s = Self {
             width: cmp::min(width, 100),
             height: cmp::min(height, 100),
-
-            selected_files: vec![],
 
             filter: None,
             open: false,
@@ -199,7 +214,6 @@ impl FileDialog {
     ///
     /// Resets the selected files.
     pub fn open(&mut self) {
-        self.selected_files.clear();
         self.selected_indices.clear();
         self.open = true;
     }
@@ -268,6 +282,22 @@ impl FileDialog {
         }
     }
 
+    /// Get the selected_files.
+    ///
+    /// Only returns them after the file dialog was closed and will reset them.
+    pub fn selected_files(&mut self) -> Option<Vec<PathBuf>> {
+        if !self.open {
+            let mut files = vec![];
+            for i in self.selected_indices.iter() {
+                files.push(self.current_dir.join(&self.items[*i]));
+            }
+            self.selected_indices.clear();
+            Some(files)
+        } else {
+            None
+        }
+    }
+
     /// Goes to the next item in the file list.
     pub fn next(&mut self) {
         let i = match self.list_state.selected() {
@@ -289,7 +319,6 @@ impl FileDialog {
     /// Resets the selected files in multi selection mode.
     pub fn up(&mut self) -> Result<()> {
         self.current_dir.pop();
-        self.selected_files.clear();
         self.selected_indices.clear();
         self.update_entries()
     }
@@ -298,7 +327,7 @@ impl FileDialog {
     ///
     /// If the item is a directory, the file dialog will move into that directory. If the item is a
     /// file, the file will be selected. If multi selection is not enabled, the file dialog will
-    /// close and the path to the file will be stored in [`FileDialog::selected_files`].
+    /// close and the path to the file can be retrieved through [`FileDialog::selected_files`].
     ///
     /// Resets the selected files when changing directory in multi selection mode.
     pub fn select(&mut self) -> Result<()> {
@@ -317,7 +346,6 @@ impl FileDialog {
         }
 
         self.current_dir = path.canonicalize()?;
-        self.selected_files.clear();
         self.selected_indices.clear();
         self.update_entries()
     }
@@ -334,16 +362,8 @@ impl FileDialog {
 
         if self.selected_indices.contains(&selected) {
             self.selected_indices.remove(&selected);
-            self.selected_files.remove(
-                self.selected_files
-                    .iter()
-                    .position(|f| f == &self.current_dir.join(&self.items[selected]))
-                    .expect("file must have been selected"),
-            );
         } else {
             self.selected_indices.insert(selected);
-            self.selected_files
-                .push(self.current_dir.join(&self.items[selected]));
         }
     }
 
