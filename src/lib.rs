@@ -92,7 +92,7 @@ use tui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
     Frame,
 };
 
@@ -278,6 +278,7 @@ impl FileDialog {
                     chunks[1],
                 );
             }
+            f.render_widget(Clear, area);
             f.render_stateful_widget(list, area, &mut self.list_state);
         }
     }
